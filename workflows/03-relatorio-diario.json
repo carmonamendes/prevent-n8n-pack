@@ -1,0 +1,173 @@
+{
+  "name": "Prevent — 03 Relatório Diário Operacional",
+  "nodes": [
+    {
+      "id": "node-trigger-22h",
+      "name": "Às 22h todo dia",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [100, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 22 * * *" }]
+        }
+      }
+    },
+    {
+      "id": "node-buscar-alarmes",
+      "name": "Buscar Alarmes do Dia",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [320, 180],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{$env.SHEETS_LOG_ALARMES_ID}}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Log Alarmes" },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "timestamp",
+              "lookupValue": "={{ $now.format('DD/MM/YYYY') }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-buscar-rondas",
+      "name": "Buscar Rondas do Dia",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [320, 380],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{$env.SHEETS_LOG_RONDAS_ID}}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Atrasos" },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "data",
+              "lookupValue": "={{ $now.format('DD/MM/YYYY') }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-buscar-ocorrencias",
+      "name": "Buscar Ocorrências da API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [320, 560],
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.PREVENT_API_URL}}/api/ocorrencias?data={{ $now.format('YYYY-MM-DD') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer {{$env.PREVENT_API_TOKEN}}" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-consolidar",
+      "name": "Consolidar Relatório",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [600, 360],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Coleta dados das 3 fontes anteriores\nconst alarmes    = $('Buscar Alarmes do Dia').all().map(i => i.json);\nconst atrasos    = $('Buscar Rondas do Dia').all().map(i => i.json);\nconst ocorrencias = $('Buscar Ocorrências da API').first().json.ocorrencias ?? [];\n\nconst data = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });\n\n// Contagem por nível de alarme\nconst criticos = alarmes.filter(a => a.nivel === 'CRITICO').length;\nconst altos    = alarmes.filter(a => a.nivel === 'ALTO').length;\nconst baixos   = alarmes.filter(a => a.nivel === 'BAIXO').length;\n\n// Vigilantes com mais atrasos\nconst ocAbertos   = ocorrencias.filter(o => o.status === 'ABERTO').length;\nconst ocFechados  = ocorrencias.filter(o => o.status === 'FECHADO').length;\n\nconst relatorio = [\n  `📋 *RELATÓRIO OPERACIONAL DIÁRIO — ${data}*`,\n  ``,\n  `🚨 *ALARMES (${alarmes.length} total)*`,\n  `• Críticos: ${criticos}`,\n  `• Altos: ${altos}`,\n  `• Baixos: ${baixos}`,\n  ``,\n  `🚶 *RONDAS*`,\n  `• Checkpoints atrasados registrados: ${atrasos.length}`,\n  ``,\n  `📝 *OCORRÊNCIAS*`,\n  `• Abertas: ${ocAbertos}`,\n  `• Fechadas: ${ocFechados}`,\n  ``,\n  `_Gerado automaticamente às 22h — Prevent Security_`\n].join('\\n');\n\nreturn { relatorio, data, total_alarmes: alarmes.length, ocorrencias_abertas: ocAbertos };"
+      }
+    },
+    {
+      "id": "node-enviar-relatorio-diretoria",
+      "name": "Enviar para Diretoria",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [880, 260],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.EVOLUTION_API_URL}}/message/sendText/{{$env.EVOLUTION_INSTANCE}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "apikey", "value": "={{$env.EVOLUTION_API_KEY}}" }]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "number", "value": "={{$env.WA_DIRETORIA}}" },
+            { "name": "text",   "value": "={{ $json.relatorio }}" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-enviar-relatorio-supervisores",
+      "name": "Enviar para Grupo Supervisores",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [880, 460],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.EVOLUTION_API_URL}}/message/sendText/{{$env.EVOLUTION_INSTANCE}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "apikey", "value": "={{$env.EVOLUTION_API_KEY}}" }]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "number", "value": "={{$env.WA_GRUPO_SUPERVISORES}}" },
+            { "name": "text",   "value": "={{ $json.relatorio }}" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-salvar-historico",
+      "name": "Salvar Histórico Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1100, 360],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{$env.SHEETS_HISTORICO_ID}}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Relatórios Diários" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "data":                "={{ $json.data }}",
+            "total_alarmes":       "={{ $json.total_alarmes }}",
+            "ocorrencias_abertas": "={{ $json.ocorrencias_abertas }}",
+            "relatorio_completo":  "={{ $json.relatorio }}"
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Às 22h todo dia": {
+      "main": [[
+        { "node": "Buscar Alarmes do Dia",     "type": "main", "index": 0 },
+        { "node": "Buscar Rondas do Dia",      "type": "main", "index": 0 },
+        { "node": "Buscar Ocorrências da API", "type": "main", "index": 0 }
+      ]]
+    },
+    "Buscar Alarmes do Dia":     { "main": [[{ "node": "Consolidar Relatório", "type": "main", "index": 0 }]] },
+    "Buscar Rondas do Dia":      { "main": [[{ "node": "Consolidar Relatório", "type": "main", "index": 0 }]] },
+    "Buscar Ocorrências da API": { "main": [[{ "node": "Consolidar Relatório", "type": "main", "index": 0 }]] },
+    "Consolidar Relatório": {
+      "main": [[
+        { "node": "Enviar para Diretoria",          "type": "main", "index": 0 },
+        { "node": "Enviar para Grupo Supervisores", "type": "main", "index": 0 }
+      ]]
+    },
+    "Enviar para Diretoria":          { "main": [[{ "node": "Salvar Histórico Sheets", "type": "main", "index": 0 }]] },
+    "Enviar para Grupo Supervisores": { "main": [[{ "node": "Salvar Histórico Sheets", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1", "saveManualExecutions": true },
+  "tags": ["prevent", "relatorio", "gestao"]
+}

@@ -1,0 +1,242 @@
+{
+  "name": "Prevent — 04 Escalonamento de Emergência",
+  "nodes": [
+    {
+      "id": "node-webhook-critico",
+      "name": "Webhook Evento Crítico",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [100, 300],
+      "webhookId": "emergencia-critica",
+      "parameters": {
+        "path": "emergencia-critica",
+        "httpMethod": "POST",
+        "responseMode": "onReceived"
+      }
+    },
+    {
+      "id": "node-formatar-emergencia",
+      "name": "Formatar Dados da Emergência",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [320, 300],
+      "parameters": {
+        "mode": "manual",
+        "fields": {
+          "values": [
+            { "name": "evento_id",   "type": "string", "value": "={{ $json.body.id ?? $now.toISO() }}" },
+            { "name": "tipo",        "type": "string", "value": "={{ $json.body.tipo }}" },
+            { "name": "cliente",     "type": "string", "value": "={{ $json.body.cliente }}" },
+            { "name": "endereco",    "type": "string", "value": "={{ $json.body.endereco }}" },
+            { "name": "timestamp",   "type": "string", "value": "={{ $now.format('DD/MM/YYYY HH:mm:ss') }}" },
+            { "name": "ack_url",     "type": "string", "value": "={{$env.PREVENT_API_URL}}/api/emergencias/{{ $json.body.id }}/ack" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-nivel1-operador",
+      "name": "Nível 1 — Notificar Operador",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [540, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.EVOLUTION_API_URL}}/message/sendText/{{$env.EVOLUTION_INSTANCE}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "apikey", "value": "={{$env.EVOLUTION_API_KEY}}" }]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "number", "value": "={{$env.WA_OPERADOR_PLANTAO}}" },
+            { "name": "text",   "value": "🚨 *EMERGÊNCIA — AÇÃO IMEDIATA*\n\n*Tipo:* {{ $json.tipo }}\n*Cliente:* {{ $json.cliente }}\n*Endereço:* {{ $json.endereco }}\n*Horário:* {{ $json.timestamp }}\n\nResponda *SIM* para confirmar atendimento.\nVocê tem *5 minutos* antes de escalar." }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-aguardar-5min",
+      "name": "Aguardar 5 minutos",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [760, 300],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 5,
+        "unit": "minutes"
+      }
+    },
+    {
+      "id": "node-verificar-ack-1",
+      "name": "Verificar Confirmação (Nível 1)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [980, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Formatar Dados da Emergência').item.json.ack_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Authorization", "value": "Bearer {{$env.PREVENT_API_TOKEN}}" }]
+        }
+      }
+    },
+    {
+      "id": "node-foi-confirmado-1",
+      "name": "Foi Confirmado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1200, 300],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.confirmado }}",
+              "operator": { "type": "boolean", "operation": "true" }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-nivel2-supervisor",
+      "name": "Nível 2 — Escalar para Supervisor",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1420, 180],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.EVOLUTION_API_URL}}/message/sendText/{{$env.EVOLUTION_INSTANCE}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "apikey", "value": "={{$env.EVOLUTION_API_KEY}}" }]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "number", "value": "={{$env.WA_SUPERVISOR_PLANTAO}}" },
+            { "name": "text",   "value": "⚠️ *ESCALAMENTO NÍVEL 2 — Operador não respondeu*\n\n*Tipo:* {{ $('Formatar Dados da Emergência').item.json.tipo }}\n*Cliente:* {{ $('Formatar Dados da Emergência').item.json.cliente }}\n*Endereço:* {{ $('Formatar Dados da Emergência').item.json.endereco }}\n\nOperador não confirmou em 5 min. Supervisor assume o atendimento.\nVocê tem mais *5 minutos* antes de escalar à diretoria." }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-aguardar-5min-2",
+      "name": "Aguardar mais 5 minutos",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [1640, 180],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 5,
+        "unit": "minutes"
+      }
+    },
+    {
+      "id": "node-verificar-ack-2",
+      "name": "Verificar Confirmação (Nível 2)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1860, 180],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Formatar Dados da Emergência').item.json.ack_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Authorization", "value": "Bearer {{$env.PREVENT_API_TOKEN}}" }]
+        }
+      }
+    },
+    {
+      "id": "node-foi-confirmado-2",
+      "name": "Supervisor Confirmou?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2080, 180],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.confirmado }}",
+              "operator": { "type": "boolean", "operation": "true" }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-nivel3-diretoria",
+      "name": "Nível 3 — Escalar para Diretoria",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2300, 100],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.EVOLUTION_API_URL}}/message/sendText/{{$env.EVOLUTION_INSTANCE}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "apikey", "value": "={{$env.EVOLUTION_API_KEY}}" }]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "number", "value": "={{$env.WA_DIRETORIA}}" },
+            { "name": "text",   "value": "🔴 *ESCALAMENTO MÁXIMO — DIRETORIA*\n\nNenhum operador ou supervisor respondeu em 10 minutos.\n\n*Tipo:* {{ $('Formatar Dados da Emergência').item.json.tipo }}\n*Cliente:* {{ $('Formatar Dados da Emergência').item.json.cliente }}\n*Endereço:* {{ $('Formatar Dados da Emergência').item.json.endereco }}\n*Abertura:* {{ $('Formatar Dados da Emergência').item.json.timestamp }}\n\nIntervir diretamente ou acionar autoridades." }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-confirmar-atendimento",
+      "name": "Registrar Atendimento Confirmado",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1420, 420],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{$env.SHEETS_LOG_ALARMES_ID}}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Escalonamentos" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "evento_id":   "={{ $('Formatar Dados da Emergência').item.json.evento_id }}",
+            "tipo":        "={{ $('Formatar Dados da Emergência').item.json.tipo }}",
+            "cliente":     "={{ $('Formatar Dados da Emergência').item.json.cliente }}",
+            "abertura":    "={{ $('Formatar Dados da Emergência').item.json.timestamp }}",
+            "nivel_final": "NÍVEL 1 — Operador",
+            "status":      "ATENDIDO"
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Evento Crítico":        { "main": [[{ "node": "Formatar Dados da Emergência",      "type": "main", "index": 0 }]] },
+    "Formatar Dados da Emergência":  { "main": [[{ "node": "Nível 1 — Notificar Operador",      "type": "main", "index": 0 }]] },
+    "Nível 1 — Notificar Operador":  { "main": [[{ "node": "Aguardar 5 minutos",                "type": "main", "index": 0 }]] },
+    "Aguardar 5 minutos":            { "main": [[{ "node": "Verificar Confirmação (Nível 1)",   "type": "main", "index": 0 }]] },
+    "Verificar Confirmação (Nível 1)": { "main": [[{ "node": "Foi Confirmado?",                 "type": "main", "index": 0 }]] },
+    "Foi Confirmado?": {
+      "main": [
+        [{ "node": "Registrar Atendimento Confirmado",   "type": "main", "index": 0 }],
+        [{ "node": "Nível 2 — Escalar para Supervisor",  "type": "main", "index": 0 }]
+      ]
+    },
+    "Nível 2 — Escalar para Supervisor": { "main": [[{ "node": "Aguardar mais 5 minutos",              "type": "main", "index": 0 }]] },
+    "Aguardar mais 5 minutos":           { "main": [[{ "node": "Verificar Confirmação (Nível 2)",      "type": "main", "index": 0 }]] },
+    "Verificar Confirmação (Nível 2)":   { "main": [[{ "node": "Supervisor Confirmou?",                "type": "main", "index": 0 }]] },
+    "Supervisor Confirmou?": {
+      "main": [
+        [{ "node": "Registrar Atendimento Confirmado",   "type": "main", "index": 0 }],
+        [{ "node": "Nível 3 — Escalar para Diretoria",   "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1", "saveManualExecutions": true },
+  "tags": ["prevent", "emergencia", "escalonamento"]
+}

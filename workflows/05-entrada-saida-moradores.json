@@ -1,0 +1,192 @@
+{
+  "name": "Prevent — 05 Controle de Entrada/Saída de Moradores",
+  "nodes": [
+    {
+      "id": "node-webhook-app",
+      "name": "Webhook App Prevent",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [100, 300],
+      "webhookId": "entrada-saida-app",
+      "parameters": {
+        "path": "entrada-saida",
+        "httpMethod": "POST",
+        "responseMode": "onReceived"
+      }
+    },
+    {
+      "id": "node-normalizar-evento",
+      "name": "Normalizar Evento",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [320, 300],
+      "parameters": {
+        "mode": "manual",
+        "fields": {
+          "values": [
+            { "name": "tipo_acao",   "type": "string", "value": "={{ $json.body.acao }}" },
+            { "name": "morador",     "type": "string", "value": "={{ $json.body.morador_nome }}" },
+            { "name": "unidade",     "type": "string", "value": "={{ $json.body.unidade }}" },
+            { "name": "condominio",  "type": "string", "value": "={{ $json.body.condominio }}" },
+            { "name": "visitante",   "type": "string", "value": "={{ $json.body.visitante_nome ?? '' }}" },
+            { "name": "placa",       "type": "string", "value": "={{ $json.body.placa_veiculo ?? '' }}" },
+            { "name": "timestamp",   "type": "string", "value": "={{ $now.format('DD/MM/YYYY HH:mm:ss') }}" },
+            { "name": "is_visitante","type": "boolean","value": "={{ !!$json.body.visitante_nome }}" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-tipo-acesso",
+      "name": "Tipo de Acesso",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [540, 300],
+      "parameters": {
+        "mode": "expression",
+        "output": "single",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  { "leftValue": "={{ $json.tipo_acao }}", "operator": { "type": "string", "operation": "equals" }, "rightValue": "ENTRADA" },
+                  { "leftValue": "={{ $json.is_visitante }}", "operator": { "type": "boolean", "operation": "false" } }
+                ]
+              },
+              "renameOutput": true, "outputKey": "entrada_morador"
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  { "leftValue": "={{ $json.tipo_acao }}", "operator": { "type": "string", "operation": "equals" }, "rightValue": "SAIDA" },
+                  { "leftValue": "={{ $json.is_visitante }}", "operator": { "type": "boolean", "operation": "false" } }
+                ]
+              },
+              "renameOutput": true, "outputKey": "saida_morador"
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  { "leftValue": "={{ $json.is_visitante }}", "operator": { "type": "boolean", "operation": "true" } }
+                ]
+              },
+              "renameOutput": true, "outputKey": "visitante"
+            }
+          ]
+        },
+        "fallbackOutput": "extra"
+      }
+    },
+    {
+      "id": "node-notificar-morador-entrada",
+      "name": "WhatsApp: Confirmação de Entrada",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [760, 140],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.EVOLUTION_API_URL}}/message/sendText/{{$env.EVOLUTION_INSTANCE}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "apikey", "value": "={{$env.EVOLUTION_API_KEY}}" }]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "number", "value": "={{$env.WA_PORTARIA_GRUPO}}" },
+            { "name": "text",   "value": "✅ *ENTRADA REGISTRADA*\n\n*Morador:* {{ $json.morador }}\n*Unidade:* {{ $json.unidade }}\n*Condomínio:* {{ $json.condominio }}\n*Horário:* {{ $json.timestamp }}\n*Placa:* {{ $json.placa || 'Sem veículo' }}" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-notificar-morador-saida",
+      "name": "WhatsApp: Confirmação de Saída",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [760, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.EVOLUTION_API_URL}}/message/sendText/{{$env.EVOLUTION_INSTANCE}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "apikey", "value": "={{$env.EVOLUTION_API_KEY}}" }]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "number", "value": "={{$env.WA_PORTARIA_GRUPO}}" },
+            { "name": "text",   "value": "🚪 *SAÍDA REGISTRADA*\n\n*Morador:* {{ $json.morador }}\n*Unidade:* {{ $json.unidade }}\n*Condomínio:* {{ $json.condominio }}\n*Horário:* {{ $json.timestamp }}" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-notificar-visitante",
+      "name": "WhatsApp: Acesso de Visitante",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [760, 460],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.EVOLUTION_API_URL}}/message/sendText/{{$env.EVOLUTION_INSTANCE}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "apikey", "value": "={{$env.EVOLUTION_API_KEY}}" }]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "number", "value": "={{$env.WA_PORTARIA_GRUPO}}" },
+            { "name": "text",   "value": "👤 *ACESSO DE VISITANTE*\n\n*Visitante:* {{ $json.visitante }}\n*Visita:* {{ $json.morador }} ({{ $json.unidade }})\n*Condomínio:* {{ $json.condominio }}\n*Horário:* {{ $json.timestamp }}\n*Placa:* {{ $json.placa || 'A pé' }}" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-registrar-acesso",
+      "name": "Registrar no Log de Acessos",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1000, 300],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{$env.SHEETS_LOG_ACESSOS_ID}}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Log Acessos" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp":   "={{ $('Normalizar Evento').item.json.timestamp }}",
+            "acao":        "={{ $('Normalizar Evento').item.json.tipo_acao }}",
+            "morador":     "={{ $('Normalizar Evento').item.json.morador }}",
+            "unidade":     "={{ $('Normalizar Evento').item.json.unidade }}",
+            "condominio":  "={{ $('Normalizar Evento').item.json.condominio }}",
+            "visitante":   "={{ $('Normalizar Evento').item.json.visitante }}",
+            "placa":       "={{ $('Normalizar Evento').item.json.placa }}"
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook App Prevent":  { "main": [[{ "node": "Normalizar Evento",  "type": "main", "index": 0 }]] },
+    "Normalizar Evento":    { "main": [[{ "node": "Tipo de Acesso",     "type": "main", "index": 0 }]] },
+    "Tipo de Acesso": {
+      "main": [
+        [{ "node": "WhatsApp: Confirmação de Entrada", "type": "main", "index": 0 }],
+        [{ "node": "WhatsApp: Confirmação de Saída",   "type": "main", "index": 0 }],
+        [{ "node": "WhatsApp: Acesso de Visitante",    "type": "main", "index": 0 }]
+      ]
+    },
+    "WhatsApp: Confirmação de Entrada": { "main": [[{ "node": "Registrar no Log de Acessos", "type": "main", "index": 0 }]] },
+    "WhatsApp: Confirmação de Saída":   { "main": [[{ "node": "Registrar no Log de Acessos", "type": "main", "index": 0 }]] },
+    "WhatsApp: Acesso de Visitante":    { "main": [[{ "node": "Registrar no Log de Acessos", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1", "saveManualExecutions": true },
+  "tags": ["prevent", "portaria", "acessos"]
+}

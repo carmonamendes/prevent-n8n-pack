@@ -1,0 +1,232 @@
+{
+  "name": "Prevent — 01 Alarme: Triagem e Notificação",
+  "nodes": [
+    {
+      "id": "node-webhook-segware",
+      "name": "Webhook Segware",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [100, 300],
+      "webhookId": "segware-alarmes",
+      "parameters": {
+        "path": "segware-alarme",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "responseData": "firstEntryJson",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-normalizar",
+      "name": "Normalizar Evento",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [320, 300],
+      "parameters": {
+        "mode": "manual",
+        "fields": {
+          "values": [
+            { "name": "tipo",        "type": "string",  "value": "={{ $json.body.event_type ?? $json.body.tipo ?? 'DESCONHECIDO' }}" },
+            { "name": "cliente",     "type": "string",  "value": "={{ $json.body.account_name ?? $json.body.cliente }}" },
+            { "name": "endereco",    "type": "string",  "value": "={{ $json.body.address ?? $json.body.endereco }}" },
+            { "name": "zona",        "type": "string",  "value": "={{ $json.body.zone ?? $json.body.zona ?? 'Zona não informada' }}" },
+            { "name": "timestamp",   "type": "string",  "value": "={{ $now.format('DD/MM/YYYY HH:mm:ss') }}" },
+            { "name": "prioridade",  "type": "string",  "value": "={{ $json.body.priority ?? 'MEDIA' }}" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-classificar",
+      "name": "Classificar Tipo",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [540, 300],
+      "parameters": {
+        "mode": "expression",
+        "output": "single",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": false },
+                "combinator": "or",
+                "conditions": [
+                  { "leftValue": "={{ $json.tipo }}", "operator": { "type": "string", "operation": "contains" }, "rightValue": "PÂNICO" },
+                  { "leftValue": "={{ $json.tipo }}", "operator": { "type": "string", "operation": "contains" }, "rightValue": "PANICO" }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "panico"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": false },
+                "combinator": "or",
+                "conditions": [
+                  { "leftValue": "={{ $json.tipo }}", "operator": { "type": "string", "operation": "contains" }, "rightValue": "INTRUSÃO" },
+                  { "leftValue": "={{ $json.tipo }}", "operator": { "type": "string", "operation": "contains" }, "rightValue": "INVASÃO" },
+                  { "leftValue": "={{ $json.tipo }}", "operator": { "type": "string", "operation": "contains" }, "rightValue": "ZONE ALARM" }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "intrusao"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": false },
+                "combinator": "or",
+                "conditions": [
+                  { "leftValue": "={{ $json.tipo }}", "operator": { "type": "string", "operation": "contains" }, "rightValue": "INCÊNDIO" },
+                  { "leftValue": "={{ $json.tipo }}", "operator": { "type": "string", "operation": "contains" }, "rightValue": "FOGO" },
+                  { "leftValue": "={{ $json.tipo }}", "operator": { "type": "string", "operation": "contains" }, "rightValue": "SMOKE" }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "incendio"
+            }
+          ]
+        },
+        "fallbackOutput": "extra"
+      }
+    },
+    {
+      "id": "node-msg-panico",
+      "name": "Mensagem: Pânico",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [760, 100],
+      "parameters": {
+        "mode": "manual",
+        "fields": {
+          "values": [
+            { "name": "mensagem", "type": "string", "value": "🚨 *BOTÃO DE PÂNICO ACIONADO*\n\n*Cliente:* {{ $json.cliente }}\n*Endereço:* {{ $json.endereco }}\n*Zona:* {{ $json.zona }}\n*Horário:* {{ $json.timestamp }}\n\n⚡ AÇÃO IMEDIATA NECESSÁRIA — Acionar viatura e confirmar situação via telefone." },
+            { "name": "grupo_whatsapp", "type": "string", "value": "{{$env.WA_GRUPO_EMERGENCIA}}" },
+            { "name": "nivel", "type": "string", "value": "CRITICO" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-msg-intrusao",
+      "name": "Mensagem: Intrusão",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [760, 280],
+      "parameters": {
+        "mode": "manual",
+        "fields": {
+          "values": [
+            { "name": "mensagem", "type": "string", "value": "⚠️ *ALARME DE INTRUSÃO*\n\n*Cliente:* {{ $json.cliente }}\n*Endereço:* {{ $json.endereco }}\n*Zona disparada:* {{ $json.zona }}\n*Horário:* {{ $json.timestamp }}\n\nAcionar operador para verificação e contato com cliente." },
+            { "name": "grupo_whatsapp", "type": "string", "value": "{{$env.WA_GRUPO_OPERACIONAL}}" },
+            { "name": "nivel", "type": "string", "value": "ALTO" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-msg-incendio",
+      "name": "Mensagem: Incêndio",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [760, 460],
+      "parameters": {
+        "mode": "manual",
+        "fields": {
+          "values": [
+            { "name": "mensagem", "type": "string", "value": "🔥 *ALARME DE INCÊNDIO*\n\n*Cliente:* {{ $json.cliente }}\n*Endereço:* {{ $json.endereco }}\n*Sensor:* {{ $json.zona }}\n*Horário:* {{ $json.timestamp }}\n\n🚒 Acionar BOMBEIROS (193) + Notificar supervisor imediatamente." },
+            { "name": "grupo_whatsapp", "type": "string", "value": "{{$env.WA_GRUPO_EMERGENCIA}}" },
+            { "name": "nivel", "type": "string", "value": "CRITICO" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-msg-outros",
+      "name": "Mensagem: Outros",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [760, 640],
+      "parameters": {
+        "mode": "manual",
+        "fields": {
+          "values": [
+            { "name": "mensagem", "type": "string", "value": "ℹ️ *EVENTO DE ALARME*\n\n*Tipo:* {{ $json.tipo }}\n*Cliente:* {{ $json.cliente }}\n*Endereço:* {{ $json.endereco }}\n*Horário:* {{ $json.timestamp }}" },
+            { "name": "grupo_whatsapp", "type": "string", "value": "{{$env.WA_GRUPO_OPERACIONAL}}" },
+            { "name": "nivel", "type": "string", "value": "BAIXO" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-enviar-whatsapp",
+      "name": "Enviar WhatsApp (Evolution API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1000, 380],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.EVOLUTION_API_URL}}/message/sendText/{{$env.EVOLUTION_INSTANCE}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{$env.EVOLUTION_API_KEY}}" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "number", "value": "={{ $json.grupo_whatsapp }}" },
+            { "name": "text",   "value": "={{ $json.mensagem }}" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-registrar-sheets",
+      "name": "Registrar no Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1200, 380],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{$env.SHEETS_LOG_ALARMES_ID}}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Log Alarmes" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $('Normalizar Evento').item.json.timestamp }}",
+            "tipo":      "={{ $('Normalizar Evento').item.json.tipo }}",
+            "nivel":     "={{ $json.nivel }}",
+            "cliente":   "={{ $('Normalizar Evento').item.json.cliente }}",
+            "endereco":  "={{ $('Normalizar Evento').item.json.endereco }}",
+            "zona":      "={{ $('Normalizar Evento').item.json.zona }}",
+            "status":    "ABERTO"
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Segware":        { "main": [[{ "node": "Normalizar Evento",           "type": "main", "index": 0 }]] },
+    "Normalizar Evento":      { "main": [[{ "node": "Classificar Tipo",            "type": "main", "index": 0 }]] },
+    "Classificar Tipo": {
+      "main": [
+        [{ "node": "Mensagem: Pânico",   "type": "main", "index": 0 }],
+        [{ "node": "Mensagem: Intrusão", "type": "main", "index": 0 }],
+        [{ "node": "Mensagem: Incêndio", "type": "main", "index": 0 }],
+        [{ "node": "Mensagem: Outros",   "type": "main", "index": 0 }]
+      ]
+    },
+    "Mensagem: Pânico":   { "main": [[{ "node": "Enviar WhatsApp (Evolution API)", "type": "main", "index": 0 }]] },
+    "Mensagem: Intrusão": { "main": [[{ "node": "Enviar WhatsApp (Evolution API)", "type": "main", "index": 0 }]] },
+    "Mensagem: Incêndio": { "main": [[{ "node": "Enviar WhatsApp (Evolution API)", "type": "main", "index": 0 }]] },
+    "Mensagem: Outros":   { "main": [[{ "node": "Enviar WhatsApp (Evolution API)", "type": "main", "index": 0 }]] },
+    "Enviar WhatsApp (Evolution API)": { "main": [[{ "node": "Registrar no Google Sheets", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1", "saveManualExecutions": true, "callerPolicy": "workflowsFromSameOwner" },
+  "tags": ["prevent", "alarme", "operacional"]
+}

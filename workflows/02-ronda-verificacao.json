@@ -1,0 +1,144 @@
+{
+  "name": "Prevent — 02 Ronda: Verificação de Checkpoints",
+  "nodes": [
+    {
+      "id": "node-schedule",
+      "name": "Agendar Verificação",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [100, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 30 }]
+        }
+      }
+    },
+    {
+      "id": "node-buscar-checkpoints",
+      "name": "Buscar Checkpoints da API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [320, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.PREVENT_API_URL}}/api/rondas/checkpoints/pendentes",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer {{$env.PREVENT_API_TOKEN}}" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-tem-atraso",
+      "name": "Tem Checkpoint Atrasado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [540, 300],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.checkpoints_atrasados.length }}",
+              "operator": { "type": "number", "operation": "gt" },
+              "rightValue": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-formatar-alerta",
+      "name": "Formatar Alerta de Atraso",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [760, 200],
+      "parameters": {
+        "jsCode": "const checkpoints = $input.item.json.checkpoints_atrasados;\nconst agora = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });\n\nlet lista = checkpoints.map(cp => \n  `• *${cp.vigilante}* — Ponto: ${cp.local} (deveria: ${cp.horario_previsto})`\n).join('\\n');\n\nreturn {\n  mensagem: `⏰ *ALERTA DE RONDA — CHECKPOINT ATRASADO*\\n\\n${lista}\\n\\n🕐 Verificado às ${agora}\\n\\nAcionar vigilante ou supervisor da área.`,\n  total_atrasados: checkpoints.length,\n  checkpoints: checkpoints\n};"
+      }
+    },
+    {
+      "id": "node-notificar-supervisor",
+      "name": "Notificar Supervisor",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1000, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.EVOLUTION_API_URL}}/message/sendText/{{$env.EVOLUTION_INSTANCE}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{$env.EVOLUTION_API_KEY}}" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "number", "value": "={{$env.WA_SUPERVISOR_RONDAS}}" },
+            { "name": "text",   "value": "={{ $json.mensagem }}" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-registrar-atraso",
+      "name": "Registrar Atraso no Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1200, 200],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{$env.SHEETS_LOG_RONDAS_ID}}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Atrasos" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "data":             "={{ $now.format('DD/MM/YYYY') }}",
+            "hora_deteccao":    "={{ $now.format('HH:mm:ss') }}",
+            "total_atrasados":  "={{ $json.total_atrasados }}",
+            "detalhes":         "={{ JSON.stringify($json.checkpoints) }}"
+          }
+        }
+      }
+    },
+    {
+      "id": "node-tudo-ok",
+      "name": "Log: Tudo em Dia",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [760, 440],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{$env.SHEETS_LOG_RONDAS_ID}}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Verificações OK" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "data":  "={{ $now.format('DD/MM/YYYY') }}",
+            "hora":  "={{ $now.format('HH:mm:ss') }}",
+            "status": "OK"
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Agendar Verificação":      { "main": [[{ "node": "Buscar Checkpoints da API",   "type": "main", "index": 0 }]] },
+    "Buscar Checkpoints da API": { "main": [[{ "node": "Tem Checkpoint Atrasado?",   "type": "main", "index": 0 }]] },
+    "Tem Checkpoint Atrasado?": {
+      "main": [
+        [{ "node": "Formatar Alerta de Atraso", "type": "main", "index": 0 }],
+        [{ "node": "Log: Tudo em Dia",          "type": "main", "index": 0 }]
+      ]
+    },
+    "Formatar Alerta de Atraso": { "main": [[{ "node": "Notificar Supervisor",          "type": "main", "index": 0 }]] },
+    "Notificar Supervisor":      { "main": [[{ "node": "Registrar Atraso no Sheets",    "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1", "saveManualExecutions": true },
+  "tags": ["prevent", "ronda", "operacional"]
+}
