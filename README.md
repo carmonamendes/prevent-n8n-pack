@@ -42,19 +42,6 @@ prevent-n8n-pack/
 │   └── 05-entrada-saida-moradores.json
 ├── docs/
 │   └── configuracao.md
-├── festas-api/                          # API de locação de kits (Node + MariaDB)
 ├── .env.example
 └── README.md
 ```
-
----
-
-## Festas — Locação de Kits de Festa + Arcos de Balão
-
-O sistema de locação de kits (catálogo, reservas com agenda, taxas de entrega e
-montagem, pagamento **Pix + Mercado Pago** e painel administrativo) é uma **API
-dedicada em Node + TypeScript com banco MariaDB**, na pasta
-**[`festas-api/`](festas-api/)**. O frontend (SPA React/Vite) fica no repositório
-`deliveryland-site` (`/festas`).
-
-Guia completo em **[festas-api/README.md](festas-api/README.md)**.
