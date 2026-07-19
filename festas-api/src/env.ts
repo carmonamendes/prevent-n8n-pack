@@ -16,7 +16,7 @@ const schema = z.object({
   ADMIN_SENHA: z.string().optional(),
   ADMIN_NOME: z.string().optional(),
 
-  NOME_NEGOCIO: z.string().default('Kit Festas & Arcos'),
+  NOME_NEGOCIO: z.string().default('Ateliê Abelhinha'),
   TAXA_MONTAGEM: z.coerce.number().default(120),
   TAXA_ENTREGA_BASE: z.coerce.number().default(30),
   TAXA_ENTREGA_KM: z.coerce.number().default(3.5),

@@ -11,7 +11,7 @@ async function main() {
     update: {},
     create: {
       id: 1,
-      nomeNegocio: process.env.NOME_NEGOCIO || 'Kit Festas & Arcos',
+      nomeNegocio: process.env.NOME_NEGOCIO || 'Ateliê Abelhinha',
       taxaMontagem: Number(process.env.TAXA_MONTAGEM || 120),
       taxaEntregaBase: Number(process.env.TAXA_ENTREGA_BASE || 30),
       taxaEntregaKm: Number(process.env.TAXA_ENTREGA_KM || 3.5),
