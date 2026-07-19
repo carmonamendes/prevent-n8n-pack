@@ -11,7 +11,8 @@
       "parameters": {
         "path": "festas-catalogo",
         "httpMethod": "GET",
-        "responseMode": "responseNode"
+        "responseMode": "responseNode",
+        "options": { "allowedOrigins": "*" }
       }
     },
     {

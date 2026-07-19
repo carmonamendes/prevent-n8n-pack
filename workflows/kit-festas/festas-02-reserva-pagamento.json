@@ -11,7 +11,8 @@
       "parameters": {
         "path": "festas-reserva",
         "httpMethod": "POST",
-        "responseMode": "responseNode"
+        "responseMode": "responseNode",
+        "options": { "allowedOrigins": "*" }
       }
     },
     {

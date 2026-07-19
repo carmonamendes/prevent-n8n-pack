@@ -11,7 +11,8 @@
       "parameters": {
         "path": "festas-admin-reserva",
         "httpMethod": "POST",
-        "responseMode": "responseNode"
+        "responseMode": "responseNode",
+        "options": { "allowedOrigins": "*" }
       }
     },
     {
