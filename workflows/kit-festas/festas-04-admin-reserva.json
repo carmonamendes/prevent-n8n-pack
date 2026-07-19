@@ -1,0 +1,157 @@
+{
+  "name": "Festas — 04 Admin: confirmar Pix / cancelar / listar",
+  "nodes": [
+    {
+      "id": "node-webhook-admin",
+      "name": "Webhook Admin (POST)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [80, 320],
+      "webhookId": "festas-admin-reserva",
+      "parameters": {
+        "path": "festas-admin-reserva",
+        "httpMethod": "POST",
+        "responseMode": "responseNode"
+      }
+    },
+    {
+      "id": "node-ler-reservas-admin",
+      "name": "Ler Reservas",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [300, 320],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{$env.SHEETS_FESTAS_ID}}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Reservas" },
+        "options": {}
+      }
+    },
+    {
+      "id": "node-autorizar",
+      "name": "Autorizar e Resolver Ação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 320],
+      "parameters": {
+        "jsCode": "const body = $('Webhook Admin (POST)').first().json.body || {};\nconst token = String(body.token || '');\nconst acao = String(body.acao || 'listar').toLowerCase();\nconst reservaId = String(body.reserva_id || '').trim();\n\nif (token !== String($env.FESTAS_ADMIN_TOKEN)) {\n  return [{ json: { ok: false, code: 401, erro: 'Token inválido.', _fluxo: 'erro' } }];\n}\n\nconst reservas = $('Ler Reservas').all().map(i => i.json);\n\n// LISTAR — devolve todas as reservas (para o painel)\nif (acao === 'listar') {\n  const lista = reservas.map(r => ({\n    id: r.id, criado_em: r.criado_em, kit_nome: r.kit_nome,\n    data_evento: String(r.data_evento).slice(0,10), periodo: r.periodo,\n    cliente_nome: r.cliente_nome, cliente_whatsapp: r.cliente_whatsapp,\n    endereco: r.endereco, valor_total: r.valor_total,\n    metodo_pagamento: r.metodo_pagamento, status: String(r.status||'').toUpperCase()\n  }));\n  return [{ json: { ok: true, code: 200, acao, reservas: lista, _fluxo: 'listar' } }];\n}\n\n// CONFIRMAR / CANCELAR — precisam de reserva_id\nif (!reservaId) return [{ json: { ok:false, code:400, erro:'reserva_id obrigatório.', _fluxo:'erro' } }];\nconst reserva = reservas.find(r => String(r.id) === reservaId);\nif (!reserva) return [{ json: { ok:false, code:404, erro:'Reserva não encontrada.', _fluxo:'erro' } }];\n\nlet novoStatus;\nif (acao === 'confirmar') novoStatus = 'PAGO';\nelse if (acao === 'cancelar') novoStatus = 'CANCELADO';\nelse return [{ json: { ok:false, code:400, erro:'Ação inválida (use confirmar, cancelar ou listar).', _fluxo:'erro' } }];\n\nreturn [{ json: { ok:true, code:200, acao, novo_status: novoStatus, reserva, _fluxo: 'atualizar' } }];"
+      }
+    },
+    {
+      "id": "node-switch-fluxo",
+      "name": "Roteador",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [740, 320],
+      "parameters": {
+        "mode": "expression",
+        "output": "single",
+        "rules": { "values": [
+          { "conditions": { "combinator": "and", "conditions": [ { "leftValue": "={{ $json._fluxo }}", "operator": { "type": "string", "operation": "equals" }, "rightValue": "atualizar" } ] }, "renameOutput": true, "outputKey": "atualizar" },
+          { "conditions": { "combinator": "and", "conditions": [ { "leftValue": "={{ $json._fluxo }}", "operator": { "type": "string", "operation": "equals" }, "rightValue": "listar" } ] }, "renameOutput": true, "outputKey": "listar" }
+        ] },
+        "fallbackOutput": "extra"
+      }
+    },
+    {
+      "id": "node-atualizar-status",
+      "name": "Atualizar Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [960, 200],
+      "parameters": {
+        "operation": "update",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{$env.SHEETS_FESTAS_ID}}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Reservas" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["id"],
+          "value": {
+            "id": "={{ $json.reserva.id }}",
+            "status": "={{ $json.novo_status }}",
+            "obs": "={{ 'admin:' + $json.acao + ' ' + $now.format('DD/MM/YYYY HH:mm') }}"
+          }
+        }
+      }
+    },
+    {
+      "id": "node-avisar-cliente-admin",
+      "name": "WhatsApp: Cliente",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1180, 120],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.EVOLUTION_API_URL}}/message/sendText/{{$env.EVOLUTION_INSTANCE}}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [ { "name": "apikey", "value": "={{$env.EVOLUTION_API_KEY}}" } ] },
+        "sendBody": true,
+        "bodyParameters": { "parameters": [
+          { "name": "number", "value": "={{ $('Autorizar e Resolver Ação').item.json.reserva.cliente_whatsapp }}" },
+          { "name": "text", "value": "={{ $('Autorizar e Resolver Ação').item.json.novo_status === 'PAGO' ? ('✅ *Reserva confirmada!*\\n\\nOlá ' + $('Autorizar e Resolver Ação').item.json.reserva.cliente_nome + ', recebemos seu pagamento via Pix. Sua reserva do *' + $('Autorizar e Resolver Ação').item.json.reserva.kit_nome + '* para *' + $('Autorizar e Resolver Ação').item.json.reserva.data_evento + '* está garantida! 🎉\\n\\nReserva: ' + $('Autorizar e Resolver Ação').item.json.reserva.id) : ('⚠️ *Reserva cancelada*\\n\\nOlá ' + $('Autorizar e Resolver Ação').item.json.reserva.cliente_nome + ', sua reserva ' + $('Autorizar e Resolver Ação').item.json.reserva.id + ' (' + $('Autorizar e Resolver Ação').item.json.reserva.data_evento + ') foi cancelada. Qualquer dúvida, fale com a gente.') }}" }
+        ] }
+      }
+    },
+    {
+      "id": "node-responder-atualizar",
+      "name": "Responder (atualizar)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1400, 200],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, reserva_id: $('Autorizar e Resolver Ação').item.json.reserva.id, status: $('Autorizar e Resolver Ação').item.json.novo_status }) }}",
+        "options": { "responseHeaders": { "entries": [
+          { "name": "Access-Control-Allow-Origin", "value": "={{$env.FESTAS_CORS_ORIGIN}}" },
+          { "name": "Content-Type", "value": "application/json; charset=utf-8" }
+        ] } }
+      }
+    },
+    {
+      "id": "node-responder-listar",
+      "name": "Responder (listar)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [960, 360],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, reservas: $json.reservas }) }}",
+        "options": { "responseHeaders": { "entries": [
+          { "name": "Access-Control-Allow-Origin", "value": "={{$env.FESTAS_CORS_ORIGIN}}" },
+          { "name": "Content-Type", "value": "application/json; charset=utf-8" }
+        ] } }
+      }
+    },
+    {
+      "id": "node-responder-erro-admin",
+      "name": "Responder (erro)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [960, 520],
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": "={{ $json.code || 400 }}",
+        "responseBody": "={{ JSON.stringify({ ok: false, erro: $json.erro }) }}",
+        "options": { "responseHeaders": { "entries": [
+          { "name": "Access-Control-Allow-Origin", "value": "={{$env.FESTAS_CORS_ORIGIN}}" },
+          { "name": "Content-Type", "value": "application/json; charset=utf-8" }
+        ] } }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Admin (POST)": { "main": [[{ "node": "Ler Reservas", "type": "main", "index": 0 }]] },
+    "Ler Reservas": { "main": [[{ "node": "Autorizar e Resolver Ação", "type": "main", "index": 0 }]] },
+    "Autorizar e Resolver Ação": { "main": [[{ "node": "Roteador", "type": "main", "index": 0 }]] },
+    "Roteador": { "main": [
+      [{ "node": "Atualizar Status", "type": "main", "index": 0 }],
+      [{ "node": "Responder (listar)", "type": "main", "index": 0 }],
+      [{ "node": "Responder (erro)", "type": "main", "index": 0 }]
+    ] },
+    "Atualizar Status": { "main": [[{ "node": "WhatsApp: Cliente", "type": "main", "index": 0 }]] },
+    "WhatsApp: Cliente": { "main": [[{ "node": "Responder (atualizar)", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1", "saveManualExecutions": true },
+  "tags": ["festas", "admin", "pix", "reservas"]
+}

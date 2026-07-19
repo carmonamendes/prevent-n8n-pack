@@ -1,0 +1,258 @@
+{
+  "name": "Festas — 02 Reserva + Pagamento (Pix/Mercado Pago)",
+  "nodes": [
+    {
+      "id": "node-webhook-reserva",
+      "name": "Webhook Reserva (POST)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [80, 340],
+      "webhookId": "festas-reserva",
+      "parameters": {
+        "path": "festas-reserva",
+        "httpMethod": "POST",
+        "responseMode": "responseNode"
+      }
+    },
+    {
+      "id": "node-ler-kits-r",
+      "name": "Ler Kits",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [300, 340],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{$env.SHEETS_FESTAS_ID}}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Kits" },
+        "options": {}
+      }
+    },
+    {
+      "id": "node-ler-reservas-r",
+      "name": "Ler Reservas",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [520, 340],
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{$env.SHEETS_FESTAS_ID}}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Reservas" },
+        "options": {}
+      }
+    },
+    {
+      "id": "node-validar",
+      "name": "Validar e Calcular",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [740, 340],
+      "parameters": {
+        "jsCode": "const body = $('Webhook Reserva (POST)').first().json.body || {};\n\nfunction fail(msg){ return [{ json: { valido: false, erro: msg } }]; }\n\n// Campos obrigatórios\nconst kitId = String(body.kit_id || '').trim();\nconst dataEvento = String(body.data_evento || '').slice(0, 10);\nconst nome = String(body.cliente_nome || '').trim();\nconst whatsapp = String(body.cliente_whatsapp || '').replace(/\\D/g, '');\nconst metodo = String(body.metodo_pagamento || 'pix').toLowerCase();\nconst querMontagem = body.quer_montagem === true || body.quer_montagem === 'true';\nconst distanciaKm = Math.max(0, Number(body.distancia_km) || 0);\nconst endereco = String(body.endereco || '').trim();\nconst periodo = String(body.periodo || 'dia').trim();\n\nif (!kitId) return fail('Kit não informado.');\nif (!/^\\d{4}-\\d{2}-\\d{2}$/.test(dataEvento)) return fail('Data do evento inválida.');\nif (nome.length < 2) return fail('Informe o nome do cliente.');\nif (whatsapp.length < 10) return fail('WhatsApp do cliente inválido.');\nif (!['pix', 'mercadopago'].includes(metodo)) return fail('Método de pagamento inválido.');\n\n// Kit existe e está ativo?\nconst kit = $('Ler Kits').all().map(i => i.json)\n  .find(k => String(k.id) === kitId && String(k.ativo).toUpperCase() === 'SIM');\nif (!kit) return fail('Kit indisponível.');\n\n// Antecedência mínima\nconst antecedencia = Number($env.FESTAS_ANTECEDENCIA_MIN_DIAS || 2);\nconst hojeISO = $now.toFormat('yyyy-MM-dd');\nconst diffDias = Math.ceil((new Date(dataEvento + 'T00:00:00') - new Date(hojeISO + 'T00:00:00')) / 86400000);\nif (diffDias < antecedencia) return fail(`Reserve com pelo menos ${antecedencia} dia(s) de antecedência.`);\n\n// Data já ocupada?\nconst STATUS_OCUPA = ['AGUARDANDO_PAGAMENTO', 'PAGO', 'CONCLUIDO'];\nconst ocupada = $('Ler Reservas').all().map(i => i.json)\n  .some(r => String(r.data_evento).slice(0,10) === dataEvento && STATUS_OCUPA.includes(String(r.status||'').toUpperCase()));\nif (ocupada) return fail('Essa data já está reservada. Escolha outra.');\n\n// Cálculo dos valores (server-side, fonte de verdade)\nconst precoKit = Number(kit.preco_locacao) || 0;\nconst taxaEntrega = Number($env.FESTAS_TAXA_ENTREGA_BASE || 0) + (Number($env.FESTAS_TAXA_ENTREGA_KM || 0) * distanciaKm);\nconst taxaMontagem = querMontagem ? (Number($env.FESTAS_TAXA_MONTAGEM) || 0) : 0;\nconst valorTotal = Math.round((precoKit + taxaEntrega + taxaMontagem) * 100) / 100;\n\n// ID curto e único da reserva\nconst rid = 'R' + $now.format('yyMMdd') + '-' + $runIndex + '-' + Math.abs(($now.toMillis() % 100000)).toString().padStart(5,'0');\nconst reservaId = rid.replace(/[^A-Za-z0-9-]/g, '');\n\nreturn [{ json: {\n  valido: true,\n  reserva_id: reservaId,\n  criado_em: $now.format('DD/MM/YYYY HH:mm:ss'),\n  kit_id: kitId,\n  kit_nome: kit.nome,\n  data_evento: dataEvento,\n  periodo,\n  cliente_nome: nome,\n  cliente_whatsapp: whatsapp,\n  endereco,\n  distancia_km: distanciaKm,\n  taxa_entrega: Math.round(taxaEntrega * 100) / 100,\n  taxa_montagem: taxaMontagem,\n  valor_kit: precoKit,\n  valor_total: valorTotal,\n  metodo_pagamento: metodo,\n  status: 'AGUARDANDO_PAGAMENTO'\n} }];"
+      }
+    },
+    {
+      "id": "node-if-valido",
+      "name": "É válido?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [960, 340],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "combinator": "and",
+          "conditions": [
+            { "leftValue": "={{ $json.valido }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-responder-erro",
+      "name": "Responder Erro",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1180, 520],
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 422,
+        "responseBody": "={{ JSON.stringify({ ok: false, erro: $json.erro }) }}",
+        "options": {
+          "responseHeaders": { "entries": [
+            { "name": "Access-Control-Allow-Origin", "value": "={{$env.FESTAS_CORS_ORIGIN}}" },
+            { "name": "Content-Type", "value": "application/json; charset=utf-8" }
+          ] }
+        }
+      }
+    },
+    {
+      "id": "node-gravar-reserva",
+      "name": "Gravar Reserva",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1180, 240],
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{$env.SHEETS_FESTAS_ID}}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Reservas" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $json.reserva_id }}",
+            "criado_em": "={{ $json.criado_em }}",
+            "kit_id": "={{ $json.kit_id }}",
+            "kit_nome": "={{ $json.kit_nome }}",
+            "data_evento": "={{ $json.data_evento }}",
+            "periodo": "={{ $json.periodo }}",
+            "cliente_nome": "={{ $json.cliente_nome }}",
+            "cliente_whatsapp": "={{ $json.cliente_whatsapp }}",
+            "endereco": "={{ $json.endereco }}",
+            "taxa_entrega": "={{ $json.taxa_entrega }}",
+            "taxa_montagem": "={{ $json.taxa_montagem }}",
+            "valor_kit": "={{ $json.valor_kit }}",
+            "valor_total": "={{ $json.valor_total }}",
+            "metodo_pagamento": "={{ $json.metodo_pagamento }}",
+            "status": "={{ $json.status }}",
+            "pagamento_id": "",
+            "obs": ""
+          }
+        }
+      }
+    },
+    {
+      "id": "node-switch-metodo",
+      "name": "Método de Pagamento",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1400, 240],
+      "parameters": {
+        "mode": "expression",
+        "output": "single",
+        "rules": {
+          "values": [
+            { "conditions": { "combinator": "and", "conditions": [ { "leftValue": "={{ $('Validar e Calcular').item.json.metodo_pagamento }}", "operator": { "type": "string", "operation": "equals" }, "rightValue": "pix" } ] }, "renameOutput": true, "outputKey": "pix" },
+            { "conditions": { "combinator": "and", "conditions": [ { "leftValue": "={{ $('Validar e Calcular').item.json.metodo_pagamento }}", "operator": { "type": "string", "operation": "equals" }, "rightValue": "mercadopago" } ] }, "renameOutput": true, "outputKey": "mercadopago" }
+          ]
+        },
+        "fallbackOutput": "extra"
+      }
+    },
+    {
+      "id": "node-gerar-pix",
+      "name": "Gerar Pix Copia-e-Cola",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1620, 140],
+      "parameters": {
+        "jsCode": "const r = $('Validar e Calcular').item.json;\n\nfunction norm(s, max){\n  return String(s || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')\n    .replace(/[^A-Za-z0-9 ]/g, '').toUpperCase().trim().slice(0, max);\n}\nfunction tlv(id, value){\n  const len = String(value.length).padStart(2, '0');\n  return `${id}${len}${value}`;\n}\nfunction crc16(payload){\n  let crc = 0xFFFF;\n  for (let i = 0; i < payload.length; i++){\n    crc ^= payload.charCodeAt(i) << 8;\n    for (let j = 0; j < 8; j++){\n      crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1);\n      crc &= 0xFFFF;\n    }\n  }\n  return crc.toString(16).toUpperCase().padStart(4, '0');\n}\n\nconst chave = String($env.FESTAS_PIX_CHAVE || '').trim();\nconst nome = norm($env.FESTAS_PIX_NOME, 25) || 'RECEBEDOR';\nconst cidade = norm($env.FESTAS_PIX_CIDADE, 15) || 'BRASIL';\nconst valor = (Number(r.valor_total) || 0).toFixed(2);\nconst txid = norm(r.reserva_id, 25).replace(/ /g, '') || '***';\n\nconst mai = tlv('00', 'br.gov.bcb.pix') + tlv('01', chave);\nlet payload = ''\n  + tlv('00', '01')\n  + tlv('26', mai)\n  + tlv('52', '0000')\n  + tlv('53', '986')\n  + tlv('54', valor)\n  + tlv('58', 'BR')\n  + tlv('59', nome)\n  + tlv('60', cidade)\n  + tlv('62', tlv('05', txid));\npayload += '6304';\nconst brcode = payload + crc16(payload);\n\nreturn [{ json: {\n  ok: true,\n  reserva_id: r.reserva_id,\n  status: r.status,\n  metodo_pagamento: 'pix',\n  valor_total: r.valor_total,\n  resumo: {\n    kit_nome: r.kit_nome, data_evento: r.data_evento, periodo: r.periodo,\n    valor_kit: r.valor_kit, taxa_entrega: r.taxa_entrega, taxa_montagem: r.taxa_montagem\n  },\n  pagamento: {\n    tipo: 'pix',\n    pix_copia_cola: brcode,\n    chave: chave,\n    instrucoes: 'Copie o código Pix e pague no app do seu banco. A reserva é confirmada assim que o pagamento for identificado.'\n  }\n} }];"
+      }
+    },
+    {
+      "id": "node-mp-preferencia",
+      "name": "MP: Criar Preferência",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1620, 340],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.mercadopago.com/checkout/preferences",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "Authorization", "value": "=Bearer {{$env.FESTAS_MP_ACCESS_TOKEN}}" },
+          { "name": "Content-Type", "value": "application/json" }
+        ] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  items: [{\n    title: ($('Validar e Calcular').item.json.kit_nome + ' — locação ' + $('Validar e Calcular').item.json.data_evento),\n    quantity: 1,\n    currency_id: 'BRL',\n    unit_price: $('Validar e Calcular').item.json.valor_total\n  }],\n  external_reference: $('Validar e Calcular').item.json.reserva_id,\n  payer: { name: $('Validar e Calcular').item.json.cliente_nome },\n  back_urls: {\n    success: $env.FESTAS_MP_URL_SUCESSO,\n    pending: $env.FESTAS_MP_URL_PENDENTE,\n    failure: $env.FESTAS_MP_URL_ERRO\n  },\n  auto_return: 'approved',\n  notification_url: ($env.FESTAS_N8N_BASE_URL + '/webhook/festas-mp-webhook'),\n  statement_descriptor: ($env.FESTAS_NOME_NEGOCIO || 'FESTAS')\n}) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-mp-formatar",
+      "name": "MP: Formatar Resposta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1840, 340],
+      "parameters": {
+        "jsCode": "const r = $('Validar e Calcular').item.json;\nconst mp = $json;\nreturn [{ json: {\n  ok: true,\n  reserva_id: r.reserva_id,\n  status: r.status,\n  metodo_pagamento: 'mercadopago',\n  valor_total: r.valor_total,\n  resumo: {\n    kit_nome: r.kit_nome, data_evento: r.data_evento, periodo: r.periodo,\n    valor_kit: r.valor_kit, taxa_entrega: r.taxa_entrega, taxa_montagem: r.taxa_montagem\n  },\n  pagamento: {\n    tipo: 'mercadopago',\n    preference_id: mp.id,\n    init_point: mp.init_point || mp.sandbox_init_point,\n    instrucoes: 'Você será direcionado ao checkout do Mercado Pago para concluir o pagamento.'\n  }\n} }];"
+      }
+    },
+    {
+      "id": "node-atualizar-pagamento-id",
+      "name": "Salvar preference_id",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [2060, 340],
+      "parameters": {
+        "operation": "update",
+        "documentId": { "__rl": true, "mode": "id", "value": "={{$env.SHEETS_FESTAS_ID}}" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Reservas" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["id"],
+          "value": {
+            "id": "={{ $json.reserva_id }}",
+            "pagamento_id": "={{ $json.pagamento.preference_id }}"
+          }
+        }
+      }
+    },
+    {
+      "id": "node-notificar-dono",
+      "name": "WhatsApp: Nova Reserva (dono)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2060, 140],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.EVOLUTION_API_URL}}/message/sendText/{{$env.EVOLUTION_INSTANCE}}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [ { "name": "apikey", "value": "={{$env.EVOLUTION_API_KEY}}" } ] },
+        "sendBody": true,
+        "bodyParameters": { "parameters": [
+          { "name": "number", "value": "={{$env.WA_FESTAS_DONO}}" },
+          { "name": "text", "value": "=🎈 *NOVA RESERVA* ({{ $json.status }})\n\n*Reserva:* {{ $json.reserva_id }}\n*Kit:* {{ $json.resumo.kit_nome }}\n*Data:* {{ $json.resumo.data_evento }} ({{ $json.resumo.periodo }})\n*Cliente:* {{ $('Validar e Calcular').item.json.cliente_nome }} — {{ $('Validar e Calcular').item.json.cliente_whatsapp }}\n*Endereço:* {{ $('Validar e Calcular').item.json.endereco }}\n\n*Kit:* R$ {{ $json.resumo.valor_kit }}\n*Entrega:* R$ {{ $json.resumo.taxa_entrega }}\n*Montagem:* R$ {{ $json.resumo.taxa_montagem }}\n*TOTAL:* R$ {{ $json.valor_total }}\n*Pagamento:* {{ $json.metodo_pagamento }}" }
+        ] }
+      }
+    },
+    {
+      "id": "node-responder-ok",
+      "name": "Responder OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2280, 240],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseHeaders": { "entries": [
+            { "name": "Access-Control-Allow-Origin", "value": "={{$env.FESTAS_CORS_ORIGIN}}" },
+            { "name": "Content-Type", "value": "application/json; charset=utf-8" }
+          ] }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Reserva (POST)": { "main": [[{ "node": "Ler Kits", "type": "main", "index": 0 }]] },
+    "Ler Kits": { "main": [[{ "node": "Ler Reservas", "type": "main", "index": 0 }]] },
+    "Ler Reservas": { "main": [[{ "node": "Validar e Calcular", "type": "main", "index": 0 }]] },
+    "Validar e Calcular": { "main": [[{ "node": "É válido?", "type": "main", "index": 0 }]] },
+    "É válido?": { "main": [
+      [{ "node": "Gravar Reserva", "type": "main", "index": 0 }],
+      [{ "node": "Responder Erro", "type": "main", "index": 0 }]
+    ] },
+    "Gravar Reserva": { "main": [[{ "node": "Método de Pagamento", "type": "main", "index": 0 }]] },
+    "Método de Pagamento": { "main": [
+      [{ "node": "Gerar Pix Copia-e-Cola", "type": "main", "index": 0 }],
+      [{ "node": "MP: Criar Preferência", "type": "main", "index": 0 }]
+    ] },
+    "Gerar Pix Copia-e-Cola": { "main": [[{ "node": "WhatsApp: Nova Reserva (dono)", "type": "main", "index": 0 }]] },
+    "MP: Criar Preferência": { "main": [[{ "node": "MP: Formatar Resposta", "type": "main", "index": 0 }]] },
+    "MP: Formatar Resposta": { "main": [[{ "node": "Salvar preference_id", "type": "main", "index": 0 }]] },
+    "Salvar preference_id": { "main": [[{ "node": "WhatsApp: Nova Reserva (dono)", "type": "main", "index": 0 }]] },
+    "WhatsApp: Nova Reserva (dono)": { "main": [[{ "node": "Responder OK", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1", "saveManualExecutions": true },
+  "tags": ["festas", "reserva", "pagamento", "pix", "mercadopago"]
+}
