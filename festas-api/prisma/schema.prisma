@@ -1,0 +1,84 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+/// Kits disponíveis para locação
+model Kit {
+  id           Int       @id @default(autoincrement())
+  nome         String
+  tema         String?
+  descricao    String?   @db.Text
+  precoLocacao Decimal   @map("preco_locacao") @db.Decimal(10, 2)
+  imagemUrl    String?   @map("imagem_url") @db.Text
+  /// Itens do kit em JSON (array de strings)
+  itens        String?   @db.Text
+  ativo        Boolean   @default(true)
+  criadoEm     DateTime  @default(now()) @map("criado_em")
+  atualizadoEm DateTime  @updatedAt @map("atualizado_em")
+  reservas     Reserva[]
+
+  @@map("kits")
+}
+
+/// Reservas de locação
+model Reserva {
+  id              String   @id
+  kitId           Int      @map("kit_id")
+  kit             Kit      @relation(fields: [kitId], references: [id])
+  kitNome         String   @map("kit_nome")
+  dataEvento      DateTime @map("data_evento") @db.Date
+  periodo         String   @default("dia")
+  clienteNome     String   @map("cliente_nome")
+  clienteWhatsapp String   @map("cliente_whatsapp")
+  endereco        String?  @db.Text
+  distanciaKm     Decimal  @default(0) @map("distancia_km") @db.Decimal(6, 2)
+  taxaEntrega     Decimal  @map("taxa_entrega") @db.Decimal(10, 2)
+  taxaMontagem    Decimal  @map("taxa_montagem") @db.Decimal(10, 2)
+  valorKit        Decimal  @map("valor_kit") @db.Decimal(10, 2)
+  valorTotal      Decimal  @map("valor_total") @db.Decimal(10, 2)
+  metodoPagamento String   @map("metodo_pagamento")
+  status          String   @default("AGUARDANDO_PAGAMENTO")
+  pagamentoId     String?  @map("pagamento_id")
+  obs             String?  @db.Text
+  criadoEm        DateTime @default(now()) @map("criado_em")
+  atualizadoEm    DateTime @updatedAt @map("atualizado_em")
+
+  @@index([dataEvento])
+  @@index([status])
+  @@map("reservas")
+}
+
+/// Datas bloqueadas manualmente (feriados, indisponibilidade)
+model Bloqueio {
+  id     Int      @id @default(autoincrement())
+  data   DateTime @unique @db.Date
+  motivo String?
+  @@map("bloqueios")
+}
+
+/// Configuração do negócio (linha única, id = 1) — editável no painel
+model Config {
+  id                  Int      @id @default(1)
+  nomeNegocio         String   @map("nome_negocio")
+  taxaMontagem        Decimal  @map("taxa_montagem") @db.Decimal(10, 2)
+  taxaEntregaBase     Decimal  @map("taxa_entrega_base") @db.Decimal(10, 2)
+  taxaEntregaKm       Decimal  @map("taxa_entrega_km") @db.Decimal(10, 2)
+  antecedenciaMinDias Int      @map("antecedencia_min_dias")
+  atualizadoEm        DateTime @updatedAt @map("atualizado_em")
+  @@map("config")
+}
+
+/// Usuários administradores
+model Admin {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  senhaHash String   @map("senha_hash")
+  nome      String?
+  criadoEm  DateTime @default(now()) @map("criado_em")
+  @@map("admins")
+}

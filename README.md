@@ -39,28 +39,22 @@ prevent-n8n-pack/
 │   ├── 02-ronda-verificacao.json
 │   ├── 03-relatorio-diario.json
 │   ├── 04-escalonamento-emergencia.json
-│   ├── 05-entrada-saida-moradores.json
-│   └── kit-festas/                      # Módulo Festas (locação de kits)
-│       ├── festas-01-catalogo-disponibilidade.json
-│       ├── festas-02-reserva-pagamento.json
-│       ├── festas-03-mercadopago-webhook.json
-│       ├── festas-04-admin-reserva.json
-│       └── festas-05-lembrete-evento.json
+│   └── 05-entrada-saida-moradores.json
 ├── docs/
-│   ├── configuracao.md
-│   └── kit-festas.md
+│   └── configuracao.md
+├── festas-api/                          # API de locação de kits (Node + MariaDB)
 ├── .env.example
 └── README.md
 ```
 
 ---
 
-## Módulo Festas — Locação de Kits de Festa + Arcos de Balão
+## Festas — Locação de Kits de Festa + Arcos de Balão
 
-Além dos workflows da Prevent Security, este repositório inclui o **backend de
-locação de kits de festa** que alimenta o site em `deliveryland-site/festas`.
-São 5 workflows n8n (catálogo, reserva, pagamento **Pix + Mercado Pago**,
-confirmação e agenda) usando Google Sheets como banco e Evolution API para
-WhatsApp.
+O sistema de locação de kits (catálogo, reservas com agenda, taxas de entrega e
+montagem, pagamento **Pix + Mercado Pago** e painel administrativo) é uma **API
+dedicada em Node + TypeScript com banco MariaDB**, na pasta
+**[`festas-api/`](festas-api/)**. O frontend (SPA React/Vite) fica no repositório
+`deliveryland-site` (`/festas`).
 
-Guia completo em **[docs/kit-festas.md](docs/kit-festas.md)**.
+Guia completo em **[festas-api/README.md](festas-api/README.md)**.
